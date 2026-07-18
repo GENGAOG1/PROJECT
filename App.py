@@ -1,16 +1,9 @@
 from flask import Flask, render_template_string, request, jsonify
-import sys
-import io
-import traceback
-import os
-import math
-import random
+import sys, io, traceback, os, math, random
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"
 
-HTML = """
-<!DOCTYPE html>
+HTML = """<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -45,4 +38,65 @@ function draw(){
     ctx.fillStyle="#00ff00";ctx.font=fontSize+"px monospace";
     for(let i=0;i<drops.length;i++){
         ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*fontSize,drops[i]*fontSize);
-        if(drops[i]*fontSize>canvas.height && Math.random()>0.975) drops[i]=0
+        if(drops[i]*fontSize>canvas.height && Math.random()>0.975) drops[i]=0;
+        drops[i]++;
+    }
+}
+setInterval(draw,35);
+
+const output = document.getElementById("output");
+const cmdInput = document.getElementById("command-input");
+
+output.innerHTML = "SYSTEM BOOT COMPLETE<br>Welcome, Operator.<br>Python REPL ready.<br><br>";
+
+cmdInput.addEventListener("keypress", async e => {
+    if(e.key === "Enter"){
+        const cmd = cmdInput.value.trim();
+        if(!cmd) return;
+        output.innerHTML += `<span style="color:#00cc00;">root@matrix:~$ ${cmd}</span><br>`;
+        
+        try {
+            const res = await fetch("/execute", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({command: cmd})
+            });
+            const data = await res.json();
+            if (data.output) output.innerHTML += data.output.replace(/\n/g, "<br>") + "<br>";
+            if (data.error) output.innerHTML += `<span style="color:#ff5555;">${data.error}</span><br>`;
+        } catch(err) {
+            output.innerHTML += "Execution error.<br>";
+        }
+        output.scrollTop = output.scrollHeight;
+        cmdInput.value = "";
+    }
+});
+</script>
+</body>
+</html>"""
+
+@app.route("/")
+def index():
+    return render_template_string(HTML)
+
+@app.route("/execute", methods=["POST"])
+def execute():
+    command = request.json.get("command", "")
+    if not command:
+        return jsonify({"error": "No command"})
+
+    old_stdout = sys.stdout
+    redirected = io.StringIO()
+    sys.stdout = redirected
+
+    try:
+        local_env = {"os": os, "math": math, "random": random}
+        exec(command, {"__builtins__": __builtins__}, local_env)
+        return jsonify({"output": redirected.getvalue()})
+    except Exception as e:
+        return jsonify({"error": str(traceback.format_exc())})
+    finally:
+        sys.stdout = old_stdout
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
